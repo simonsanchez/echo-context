@@ -17,6 +17,12 @@ type Server struct {
 	// add services here
 }
 
+type CustomContext struct {
+	echo.Context
+
+	Store map[string]string
+}
+
 func (s *Server) Listen(port string) error {
 	e := echo.New()
 
@@ -35,22 +41,39 @@ func (s *Server) Listen(port string) error {
 		return err
 	}
 
-	err = <-shutdown
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return <-shutdown
 }
 
 func applyMiddleware(e *echo.Echo) {
-	// add echo context extension FIRST!
+	// This middleware must come first!
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			cc := &CustomContext{
+				Context: c,
+				Store:   make(map[string]string),
+			}
+			return next(cc)
+		}
+	})
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.GzipWithConfig(middleware.GzipConfig{
 		Level: 5,
 	}))
+
+	// Sample middleware using CustomContext
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			cc := c.(*CustomContext)
+
+			cc.Store["key"] = "value"
+			cc.Store["foo"] = "bar"
+			cc.Store["now"] = time.Now().String()
+
+			return next(cc)
+		}
+	})
 }
 
 func applyRoutes(e *echo.Echo, s *Server) {
@@ -76,7 +99,14 @@ func gracefulShutdown(e *echo.Echo, c chan error) {
 }
 
 func (s *Server) Status(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"status": "up"})
+	cc := c.(*CustomContext)
+
+	response := map[string]interface{}{
+		"status": "up",
+		"store":  cc.Store,
+	}
+
+	return c.JSON(http.StatusOK, response)
 }
 
 /*
@@ -109,6 +139,6 @@ func customHTTPErrorHandler(err error, c echo.Context) {
 	}
 
 	c.JSON(code, map[string]string{
-		"errors": message,
+		"error": message,
 	})
 }
