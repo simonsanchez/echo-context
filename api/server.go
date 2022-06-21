@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/simonsanchez/echo-context/token"
+
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
@@ -21,6 +23,8 @@ type CustomContext struct {
 	echo.Context
 
 	Store map[string]string
+
+	Token token.Token
 }
 
 func (s *Server) Listen(port string) error {
@@ -46,34 +50,16 @@ func (s *Server) Listen(port string) error {
 
 func applyMiddleware(e *echo.Echo) {
 	// This middleware must come first!
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			cc := &CustomContext{
-				Context: c,
-				Store:   make(map[string]string),
-			}
-			return next(cc)
-		}
-	})
+	e.Use(withCustomContextMiddleware)
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-	e.Use(middleware.GzipWithConfig(middleware.GzipConfig{
-		Level: 5,
-	}))
+
+	// Add JWT to context
+	e.Use(withDefaultTokenMiddleware)
 
 	// Sample middleware using CustomContext
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			cc := c.(*CustomContext)
-
-			cc.Store["key"] = "value"
-			cc.Store["foo"] = "bar"
-			cc.Store["now"] = time.Now().String()
-
-			return next(cc)
-		}
-	})
+	e.Use(withCurrentTimeMiddleware)
 }
 
 func applyRoutes(e *echo.Echo, s *Server) {
@@ -96,17 +82,6 @@ func gracefulShutdown(e *echo.Echo, c chan error) {
 	} else {
 		c <- nil
 	}
-}
-
-func (s *Server) Status(c echo.Context) error {
-	cc := c.(*CustomContext)
-
-	response := map[string]interface{}{
-		"status": "up",
-		"store":  cc.Store,
-	}
-
-	return c.JSON(http.StatusOK, response)
 }
 
 /*
